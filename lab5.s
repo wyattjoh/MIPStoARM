@@ -494,7 +494,6 @@ computeRotate:
 	sw $t3, -20($fp)
 	
 	#  Calculate the distance from the most signifigant bit and least signifigant bit
-	
 	lw $t0, 0($a0)
 	
 	#  Counter for rotation
@@ -509,32 +508,48 @@ computeRotate:
 		j crP1
 	EcrP1:
 	
+	#  Move the immidiete value into $v1
+	move $v1, $t0
+	
+	#  Divide the number of shifts to the left by 2 to determine the value of Rotate
+	li $t1, 2
+	div $t2, $t1
+	
+	#  If the value of rotate is not a multiple of 2, then error, we can't express this
+	mfhi $t3
+	bnez $t3, crError
+	
+	#  Move the value of the rotate param into $t2
+	mflo $t2
+	
+	#  If false, then the number cant fit inside the rotate field
+	sltiu $t3, $t2, 16
+	beqz $t3, crError
+	
+	#  Move the rotate value into $v0
+	move $v0, $t2
+	
 	#  Phase 2: Determine if this string is of valid length
-	li $t3, 0x0
-	li $t1, 0x01
+	li $t3, 1
+	li $t1, 1
 	crP2:
 		beq $t0, $t1, EcrP2
-		addi $t3, $t3, 0x1
+		addi $t3, $t3, 1
 		srl $t0, $t0, 1
 		j crP2
 	EcrP2:
 	
 	#  Check to see if this value is legal to rotate (is less than 8 digits long)
-	sltiu $t1, $t3, 8
+	sltiu $t1, $t3, 9
 	beqz $t1, crError
-	
-	lw $t0, 0($a0)
-	srlv $t0, $t0, $t2
-	move $v1, $t0
 	
 	j Ecr
 	
 	crError:
-		li $t3, -1
+		li $v0, -1
+		li $v1, -1
 	Ecr:
-	
-	add $v0, $t3, $0
-	
+		
 	lw $ra, -4($fp)
 	lw $t0, -8($fp)
 	lw $t1, -12($fp)
@@ -640,7 +655,7 @@ parseRType:
 	sw $t2, -16($fp)
 	sw $a0, -20($fp)
 	
-	
+	#  Load the address from memory
 	lw $t0, 0($a0)
 	
 	#  Masking element
