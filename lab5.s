@@ -1132,7 +1132,7 @@ MIPStoARM:
 	#  FINISHED PROCESSING
 	addi $s0, $s0, 0x4
 	addi $t9, $t9, 4
-	j beginTranslationˇ
+	j beginTranslation
 	
 	hitSentinel:
 		
