@@ -405,8 +405,13 @@ rdData: .word 0x0
 shamtData: .word 0x0
 addressData: .word 0x0
 
+rotateData: .word 0x0
+immData: .word 0x0
+
 armAddress: .word 0x0
 armCount: .word 0x0
+
+branchTree: .word 0x0
 
 .text
 
@@ -415,7 +420,7 @@ armCount: .word 0x0
 #  allocateARMword
 #  -------------------------
 #
-#  The address of the allocation will be stored in armAddress:
+#  The address of the allocation will be stored in armAddress
 #
 #  $a0 => Number of ARM instructions to allocate for (1 per word)
 #
@@ -432,22 +437,25 @@ allocateARMword:
 	sw $a0, -12($fp)
 	sw $v0, -16($fp)
 	
-# 	1 byte is 8 bits
-# 	1 word is 4 bytes
-# 	1 inst is 1 word
-
-# 	sbrk allocates $a0 bytes, address of the start returned at $v0
-	li $t0, 0x4
+	#  1 byte is 8 bits
+	#  1 word is 4 bytes
+	#  1 inst is 1 word
+	#  sbrk allocates $a0 bytes, address of the start returned at $v0
 	
+	#  Determine the amount of bytes to allocate from the number of instructions recieved
+	li $t0, 0x4
 	mult $a0, $t0
 	
+	#  Perform the allocation
 	mflo $a0
 	li $v0, 9
 	syscall
 	
+	#  Restore the value for the number of instructions
 	lw $a0, -12($fp)
 	sw $v0, armAddress
 	
+	#  Zero the data segment
 	li $t0, 0x1
 	zeroLoop:
 		beq $t0, $a0, EndzeroLoop
@@ -457,9 +465,7 @@ allocateARMword:
 		j zeroLoop
 	EndzeroLoop:
 	
-# 	li $t0, -1
-# 	sw $t0, 0($v0)
-	
+	#  Restore values
 	lw $ra, -4($fp)
 	lw $t0, -8($fp)
 	lw $a0, -12($fp)
@@ -485,79 +491,106 @@ computeRotate:
 	sw $fp, 0($sp)
 	move $fp, $sp
 	#  Grow the stack
-	addi $sp, $sp, -20
+	addi $sp, $sp, -36
 	#  Store the values
 	sw $ra, -4($fp)
-	sw $t0, -8($fp)
-	sw $t1, -12($fp)
-	sw $t2, -16($fp)
-	sw $t3, -20($fp)
+	sw $a0, -8($fp)
+	sw $t0, -12($fp)
+	sw $t1, -16($fp)
+	sw $t2, -20($fp)
+	sw $t3, -24($fp)
+	sw $t4, -28($fp)
+	sw $t5, -32($fp)
+	sw $t6, -36($fp)
 	
 	#  Calculate the distance from the most signifigant bit and least signifigant bit
 	lw $t0, 0($a0)
 	
-	#  Counter for rotation
-	li $t2, 0x0
+	beqz $t0, crZero
 	
-	#  Phase 1: Determine the initial position of the least signifigant bit, for the shift value
-	crP1:
-		andi $t1, $t0, 0x01
-		bne $t1, $0, EcrP1
-		addi $t2, $t2, 0x1
-		srl $t0, $t0, 0x1
-		j crP1
-	EcrP1:
+	li $t1, 0x1
 	
-	#  Move the immidiete value into $v1
-	move $v1, $t0
-	
-	#  Divide the number of shifts to the left by 2 to determine the value of Rotate
-	li $t1, 2
-	div $t2, $t1
-	
-	#  If the value of rotate is not a multiple of 2, then error, we can't express this
-	mfhi $t3
-	bnez $t3, crError
-	
-	#  Move the value of the rotate param into $t2
-	mflo $t2
-	
-	#  If false, then the number cant fit inside the rotate field
-	sltiu $t3, $t2, 16
-	beqz $t3, crError
-	
-	#  Move the rotate value into $v0
-	move $v0, $t2
-	
-	#  Phase 2: Determine if this string is of valid length
-	li $t3, 1
-	li $t1, 1
-	crP2:
-		beq $t0, $t1, EcrP2
-		addi $t3, $t3, 1
+	crCountLength:
+		#  Check if first bit is one, else add a 1 to the counter and shift the value to the right by one
+		andi $t2, $t0, 0x1
+		bnez $t2, crCountLengthEnd
+		addi $t1, $t1, 0x1
 		srl $t0, $t0, 1
-		j crP2
-	EcrP2:
+		j crCountLength
+	crCountLengthEnd:
+	#  $t1 <= Position of the first (1)
 	
-	#  Check to see if this value is legal to rotate (is less than 8 digits long)
-	sltiu $t1, $t3, 9
-	beqz $t1, crError
+	lw $t0, 0($a0)
 	
-	j Ecr
+	li $t2, 0x1
+	crCountLength2:
+		srl $t0, $t0, 1
+		beqz $t0, crCountLengthEnd2
+		addi $t2, $t2, 1
+		j crCountLength2
+	crCountLengthEnd2:
+	#  $t2 <= Position of the last (1)
 	
-	crError:
-		li $v0, -1
-		li $v1, -1
-	Ecr:
+	#  $t3 <= Position of the last element (1) in the value
+	sub $t3, $t2, $t1
+	addi $t3, $t3, 1
+	lw $t0, 0($a0)
+	
+	# sltiu $t4, $t1, 9
+	# bne $t4, $0, crLess
+	
+	crMore:
+		li $t4, 8
+		ble $t2, $t4, crmImm
 		
+		crmMore:
+			li $t4, 0
+			crmL1:
+				beqz $t0, crmL1E
+				addi $t4, $t4, 1
+				sll $t0, $t0, 2
+				j crmL1
+			crmL1E:
+			
+			li $t5, 2
+			mult $t5, $t4
+			mflo $t5
+			
+			li $t6, 32
+			sub $t5, $t6, $t5
+			
+			lw $t0, 0($a0)
+			srlv $v1, $t0, $t5
+			
+			move $v0, $t4
+			
+			j crDone
+		crmImm:
+			li $v0, 0x0
+			move $v1, $t0
+		
+			j crDone
+	
+	crZero:
+		li $v0, 0x0
+		li $v1, 0x0
+		
+		j crDone
+	
+	crDone:
+	
 	lw $ra, -4($fp)
-	lw $t0, -8($fp)
-	lw $t1, -12($fp)
-	lw $t2, -16($fp)
-	lw $t3, -20($fp)
+	lw $a0, -8($fp)
+	lw $t0, -12($fp)
+	lw $t1, -16($fp)
+	lw $t2, -20($fp)
+	lw $t3, -24($fp)
+	lw $t4, -28($fp)
+	lw $t5, -32($fp)
+	lw $t6, -36($fp)
 	#  Unwind the stack
-	addi $sp, $sp, 24
-	lw $fp, -4($sp)	
+	addi $sp, $sp, 40
+	lw $fp, -4($sp)
 	jr $ra
 
 #
@@ -691,7 +724,7 @@ parseRType:
 	lw $fp, -4($sp)
 	jr $ra
 
-	#
+#
 #	parseIType
 #	----------------------
 #	
@@ -699,18 +732,21 @@ parseRType:
 #	
 #	$a0 => address to mips instruction
 #
+#	$v0 <= if success: 0, else: -1
+#
 
 parseIType:
 	addi $sp, $sp, -4
 	sw $fp, 0($sp)
 	move $fp, $sp
 	#  Grow the stack
-	addi $sp, $sp, -16
+	addi $sp, $sp, -20
 	#  Store the values
 	sw $ra, -4($fp)
 	sw $t0, -8($fp)
 	sw $t1, -12($fp)
 	sw $t2, -16($fp)
+	sw $a0, -20($fp)
 	
 	lw $t0, 0($a0)
 	
@@ -722,6 +758,23 @@ parseIType:
 	and $t2, $t0, $t1
 	
 	sw $t2, addressData
+	
+	#  Determine the rotaion values and imm values
+	
+	# rotateData: .word 0x0
+	# immData: .word 0x0
+	
+	#	computeRotate
+	#	$a0 => address to immediate value to have the rotation computed
+	#
+	#	$v0 <= value of the rotation
+	#	$v1 <= value into the immediate field
+	#
+	la $a0, addressData
+	jal computeRotate
+	
+	sw $v0, rotateData
+	sw $v1, immData
 	
 	#  Masking element
 	li $t1, 0x1F
@@ -740,8 +793,9 @@ parseIType:
 	lw $t0, -8($fp)
 	lw $t1, -12($fp)
 	lw $t2, -16($fp)
+	lw $a0, -20($fp)
 	#  Unwind the stack
-	addi $sp, $sp, 20
+	addi $sp, $sp, 24
 	lw $fp, -4($sp)
 	jr $ra
 
@@ -774,7 +828,8 @@ rrOperation:
 	la $a0, rsData
 	jal convertMIPStoARMregister
 	
-	# TODO: Check if register field is valid
+	#  Check to see if this was a valid register
+	bltz $v0, rroInvalid
 	
 	or $t0, $v0, $t0
 	sll $t0, $t0, 0x4
@@ -782,7 +837,8 @@ rrOperation:
 	la $a0, rdData
 	jal convertMIPStoARMregister
 	
-	# TODO: Check if register field is valid
+	#  Check to see if this was a valid register
+	bltz $v0, rroInvalid
 	
 	or $t0, $v0, $t0
 	sll $t0, $t0, 0xC
@@ -790,17 +846,229 @@ rrOperation:
 	la $a0, rtData
 	jal convertMIPStoARMregister
 	
-	# TODO: Check if register field is valid
+	#  Check to see if this was a valid register
+	bltz $v0, rroInvalid
 	
 	or $t0, $v0, $t0
 	
 	move $v0, $t0
+	
+	j rroExit
+	
+	rroInvalid:
+		li $v0, -1
+	rroExit:
 	
 	lw $ra, -4($fp)
 	lw $t0, -8($fp)
 	lw $a0, -12($fp)
 	#  Unwind the stack
 	addi $sp, $sp, 16
+	lw $fp, -4($sp)
+	jr $ra
+
+#
+#  riOperation
+#  ------------------------
+#
+#  $a0 => op code + condition code of operation
+#
+#  $v0 <= ARM operation translated
+
+riOperation:
+	addi $sp, $sp, -4
+	sw $fp, 0($sp)
+	move $fp, $sp
+	#  Grow the stack
+	addi $sp, $sp, -12
+	#  Store the values
+	sw $ra, -4($fp)
+	sw $t0, -8($fp)
+	sw $a0, -12($fp)
+	
+	# li $t6, 0xE00 #  Begin translation
+	sll $t0, $a0, 4
+	
+	la $a0, rsData
+	jal convertMIPStoARMregister
+	
+	#  Check to see if this was a valid register
+	bltz $v0, rioInvalid
+	
+	or $t0, $v0, $t0
+	sll $t0, $t0, 0x4
+		
+	la $a0, rtData
+	jal convertMIPStoARMregister
+	
+	#  Check to see if this was a valid register
+	bltz $v0, rioInvalid
+	
+	or $t0, $v0, $t0
+	sll $t0, $t0, 0x4
+	
+	lw $v0, rotateData
+	
+	or $t0, $v0, $t0
+	sll $t0, $t0, 0x8
+	
+	lw $v0, immData
+	
+	or $t0, $v0, $t0
+	
+	move $v0, $t0
+	
+	j rioExit
+	
+	rioInvalid:
+		li $v0, -1
+	rioExit:
+	
+	lw $ra, -4($fp)
+	lw $t0, -8($fp)
+	lw $a0, -12($fp)
+	#  Unwind the stack
+	addi $sp, $sp, 16
+	lw $fp, -4($sp)
+	jr $ra
+
+#
+#  jumpOperation
+#  ------------------------
+#
+#  $a0 => condition code of jump
+#s
+#  Will read data from memory for the specific registers
+#
+#  $v0 <= ARM operation translated
+
+jumpOperation:
+	addi $sp, $sp, -4
+	sw $fp, 0($sp)
+	move $fp, $sp
+	#  Grow the stack
+	addi $sp, $sp, -12
+	#  Store the values
+	sw $ra, -4($fp)
+	sw $t0, -8($fp)
+	sw $a0, -12($fp)
+	
+	#  Shift condition to the left by 28 bits
+	sll $t0, $a0, 28
+	
+	li $t1, 0x12F
+	sll $t1, $t1, 16
+	
+	or $t0, $t0, $t1
+	
+	li $t1, 0xFF1
+	sll $t1, $t1, 4
+	
+	or $t0, $t0, $t1
+	
+	la $a0, rsData
+	jal convertMIPStoARMregister
+	
+	#  Check to see if this was a valid register
+	bltz $v0, joInvalid
+	
+	or $v0, $t0, $v0
+	
+	j joExit
+	
+	joInvalid:
+		li $v0, -1
+	joExit:
+	
+	lw $ra, -4($fp)
+	lw $t0, -8($fp)
+	lw $a0, -12($fp)
+	#  Unwind the stack
+	addi $sp, $sp, 16
+	lw $fp, -4($sp)
+	jr $ra
+
+#
+#  computeOffset
+#
+#  computes the offset of a branch
+#
+#  $a0 => current instruction (0 indexed)
+#  $a1 => relative to current (+/-)
+
+computeOffset:
+	addi $sp, $sp, -4
+	sw $fp, 0($sp)
+	move $fp, $sp
+	#  Grow the stack
+	addi $sp, $sp, -24
+	#  Store the values
+	sw $ra, -4($fp)
+	sw $t0, -8($fp)
+	sw $t1, -12($fp)
+	sw $t2, -16($fp)
+	sw $t3, -20($fp)
+	sw $t4, -24($fp)
+	
+	la $t0, branchTree
+	
+	li $t2, 0x0 #  Our val variable
+	
+	beq $a1, $0, cpZero
+	
+	li $t1, 0x4
+	div $a1, $t1
+	
+	mfhi $t1
+	
+	bnez $t1, cpErr
+	
+	mflo $t1 #  Our Index variable
+	
+	bgtz $a1, cpPos
+	
+	cpNeg:
+		beqz $t1, cpExit
+		
+		add $t3, $t0, $t2
+		lb $t3, 0($t3)
+		
+		addi $t2, $t2, -1
+		
+		li $t4, 2
+		beq $t4, $t3, cpNeg
+		
+		addi $t1, $t1, 1
+		
+		j cpNeg
+	cpPos:
+		beqz $t1, cpExit
+			
+		add $t3, $t0, $t2
+		lb $t3, 0($t3)
+			
+		addi $t2, $t2, 1
+			
+		li $t4, 1
+		beq $t4, $t3, cpPos
+			
+		addi $t1, $t1, -1
+			
+		j cpPos
+	cpZero:
+	cpErr:
+	cpExit:
+	
+	move $v0, $t2
+	
+	lw $ra, -4($fp)
+	lw $t0, -8($fp)
+	lw $t1, -12($fp)
+	lw $t2, -16($fp)
+	lw $t3, -20($fp)
+	lw $t4, -24($fp)
+	#  Unwind the stack
+	addi $sp, $sp, 28
 	lw $fp, -4($sp)
 	jr $ra
 
@@ -814,7 +1082,7 @@ countInstructions:
 	sw $fp, 0($sp)
 	move $fp, $sp
 	#  Grow the stack
-	addi $sp, $sp, -24
+	addi $sp, $sp, -32
 	#  Store the values
 	sw $ra, -4($fp)
 	sw $t0, -8($fp)
@@ -822,6 +1090,8 @@ countInstructions:
 	sw $t2, -16($fp)
 	sw $t3, -20($fp)
 	sw $a0, -24($fp)
+	sw $t4, -28($fp)
+	sw $t5, -32($fp)
 	
 	li $t0, 0x0
 	li $t1, -1
@@ -833,14 +1103,14 @@ countInstructions:
 		srl $t3, $t2, 26
 		#  Op code stored in $t3, $t2+ free
 		
+		addi $a0, $a0, 0x4
+		
 		#  As branch instructions take 2 ARM operations, check if ARM, and add 1
 		li $t2, 0x1
 		beq $t2, $t3, ciBranch
 		
 		sll $t2, $t2, 0x2
 		beq $t2, $t3, ciBranch
-		
-		addi $a0, $a0, 0x4
 		
 		j ciLoop
 		
@@ -852,8 +1122,67 @@ countInstructions:
 	
 	sw $t0, armCount
 	
-	#  Add one more for the sentinel
-# 	addi $t0, $t0, 0x1
+	#  Allocate armCount bytes
+	li $v0, 9
+	move $a0, $t0
+	syscall
+		
+	sw $v0, branchTree
+	
+	lw $a0, -24($fp)
+	li $t1, -1
+	li $t4, 0x0
+	la $t5, branchTree
+	ciLoop2:
+		lw $t2, 0($a0)
+		beq $t2, $t1, DciLoop2
+			
+		srl $t3, $t2, 26
+		#  Op code stored in $t3, $t2+ free
+			
+		addi $a0, $a0, 0x4
+			
+		#  As branch instructions take 2 ARM operations, check if ARM, and add 1
+		li $t2, 0x1
+		beq $t2, $t3, ciBranch2
+		sll $t2, $t2, 0x2
+		beq $t2, $t3, ciBranch2
+			
+		#  Add current place to base of branchTree
+		add $t2, $t5, $t4
+		#  Store a 0 as its not a branch...
+		sb $0, 0($t2)
+			
+		#  Move one address ahead in bTree
+		addi $t4, $t4, 0x1
+			
+		j ciLoop2
+			
+		ciBranch2:
+			#  Compute address of branchTree
+			add $t2, $t5, $t4
+			#  Load the value of 1
+			li $t3, 1
+				
+			#  Store a 1 in the cmp spot
+			sb $t3, 0($t2)
+			#  Move one address ahead in bTree
+			addi $t4, $t4, 0x1
+				
+			#  Compute address of branchTree
+			add $t2, $t5, $t4
+			#  Add 1 + 1 = 2
+			addi $t3, $t3, 1
+				
+			#  Store a 2 in the BRANCH spot
+			sb $t3, 0($t2)
+				
+			#  Move one address ahead in bTree
+			addi $t4, $t4, 0x1
+				
+			
+		j ciLoop2
+	DciLoop2:
 	
 	move $v0, $t0
 	
@@ -863,8 +1192,163 @@ countInstructions:
 	lw $t2, -16($fp)
 	lw $t3, -20($fp)
 	lw $a0, -24($fp)
+	lw $t4, -28($fp)
+	lw $t5, -32($fp)
 	#  Unwind the stack
-	addi $sp, $sp, 28
+	addi $sp, $sp, 36
+	lw $fp, -4($sp)
+	jr $ra
+
+# rriShiftOperation
+# 
+# $a0 => operation pre
+# $a1 => shift operand
+# $v0 <= translated ARM command
+# 
+# 1110 0001 1010 (rtData->ARM) (rdData->ARM) (shamtData) 000 (rtData->ARM)
+# 
+
+rriShiftOperation:
+	addi $sp, $sp, -4
+	sw $fp, 0($sp)
+	move $fp, $sp
+	#  Grow the stack
+	addi $sp, $sp, -16
+	#  Store the values
+	sw $ra, -4($fp)
+	sw $t0, -8($fp)
+	sw $a0, -12($fp)
+	sw $a1, -16($fp)
+	
+	#  Insert the opp pre
+	sll $t0, $a0, 20
+	
+	#  Insert rDestination Data
+	la $a0, rdData
+	jal convertMIPStoARMregister
+	
+	#  Check to see if this was a valid register
+	bltz $v0, rrisoInvalid
+	
+	sll $v0, $v0, 12
+	or $t0, $v0, $t0
+	
+	#  Insert Shift Amount Data
+	lw $v0, shamtData
+	
+	sll $v0, $v0, 7
+	or $t0, $v0, $t0
+	
+	#  Insert shift type
+	sll $v0, $a1, 5
+	or $t0, $v0, $t0
+	
+	#  Insert rSource Data
+	la $a0, rtData
+	jal convertMIPStoARMregister
+	
+	#  Check to see if this was a valid register
+	bltz $v0, rrisoInvalid
+	
+	sll $a0, $v0, 16
+	or $t0, $a0, $t0
+	or $t0, $v0, $t0
+	
+	move $v0, $t0
+	
+	j rrisoExit
+	
+	rrisoInvalid:
+		li $v0, -1
+	rrisoExit:
+	
+	lw $ra, -4($fp)
+	lw $t0, -8($fp)
+	lw $a0, -12($fp)
+	lw $a1, -16($fp)
+	#  Unwind the stack
+	addi $sp, $sp, 20
+	lw $fp, -4($sp)
+	jr $ra
+
+# rrrShiftOperation
+# 
+# $a0 => operation pre
+# $a1 => shift operand
+# $v0 <= translated ARM command
+# 
+# 1110 0001 1010 (rtData->ARM) (rdData->ARM) (rsData->ARM) 001 (rtData->ARM)
+# 
+
+rrrShiftOperation:
+	addi $sp, $sp, -4
+	sw $fp, 0($sp)
+	move $fp, $sp
+	#  Grow the stack
+	addi $sp, $sp, -16
+	#  Store the values
+	sw $ra, -4($fp)
+	sw $t0, -8($fp)
+	sw $a0, -12($fp)
+	sw $a1, -16($fp)
+	
+	#  Insert the opp pre
+	sll $t0, $a0, 20
+	
+	#  Insert rDestination Data
+	la $a0, rdData
+	jal convertMIPStoARMregister
+	
+	#  Check to see if this was a valid register
+	bltz $v0, rrrsoInvalid
+	
+	sll $v0, $v0, 12
+	or $t0, $v0, $t0
+	
+	#  Insert Shift Amount Data
+	la $a0, rsData
+	jal convertMIPStoARMregister
+	
+	#  Check to see if this was a valid register
+	bltz $v0, rrrsoInvalid
+	
+	sll $v0, $v0, 8
+	or $t0, $v0, $t0
+	
+	#  Insert shift type
+	sll $v0, $a1, 5
+	or $t0, $v0, $t0
+	
+	#  Insert rs selector bit
+	li $v0, 0x1
+	sll $v0, $v0, 4
+	or $t0, $v0, $t0
+	
+	#  Insert rSource Data
+	la $a0, rtData
+	jal convertMIPStoARMregister
+	
+	#  Check to see if this was a valid register
+	bltz $v0, rrrsoInvalid
+	
+	sll $a0, $v0, 16
+	or $t0, $a0, $t0
+	or $t0, $v0, $t0
+	
+	move $v0, $t0
+	
+	j rrisoExit
+	
+	rrrsoInvalid:
+		li $v0, -1
+	rrrsoExit:
+	
+	lw $ra, -4($fp)
+	lw $t0, -8($fp)
+	lw $a0, -12($fp)
+	lw $a1, -16($fp)
+	#  Unwind the stack
+	addi $sp, $sp, 20
 	lw $fp, -4($sp)
 	jr $ra
 
@@ -900,6 +1384,9 @@ MIPStoARM:
 	#  Address of memory store at armAddress:
 	lw $t9, armAddress
 	
+	#  Address space offset (0 indexed)
+	li $t8, 0x0
+	
 	beginTranslation:
 	
 	li $t1, -1
@@ -915,25 +1402,34 @@ MIPStoARM:
 	#  0000 00 => (AND | OR | ADD | SUB | SRA | SRL | SLL | SRLV | SLLV | JR)
 	beqz $t1, opZero
 	
-	#  0011 00 => 0xC (ANDI)
-	li $t2, 0xC
-	beq $t1, $t2, fctANDI
-	
-	#  0011 01 => (ORI)
-	addi $t2, $t2, 0x1
-	beq $t1, $t2, fctORI
+	move $a0, $s0 #  Move the address of the instruction into $a0
+	jal parseIType
 	
 	#  0000 01 => (BGEZ)
 	li $t2, 0x1
 	beq $t1, $t2, fctBGEZ
 	
 	#  0001 00 => (BEQ)
-	sll $t2, $t2, 2
+	li $t2, 0x4
 	beq $t1, $t2, fctBEQ
 	
+	#  The following commands require the rotation to be calculated, parseIType called above will return -1 into $v0 if the computation of the rotation values goes astray. Therefore it is crutial to check to see if the rotation was computed, else print the no-op
+	li $t2, -1
+	beq $t2, $v0, fctINVALID
+	
+	#  0011 00 => 0xC (ANDI)
+	li $t2, 0xC
+	beq $t1, $t2, fctANDI
+	
+	#  0011 01 => (ORI)
+	li $t2, 0xD
+	beq $t1, $t2, fctORI
+	
 	#  0010 00 => (ADDI)
-	sll $t2, $t2, 1
+	li $t2, 0x8
 	beq $t1, $t2, fctADDI
+	
+	j fctINVALID
 	
 	opZero:
 		#  Load the information into memeory, parsing, all opcodes with 0 is automatically a R type instruction
@@ -958,6 +1454,9 @@ MIPStoARM:
 		
 		beqz $t1, fctSLL
 		
+		li $t2, 0x8
+		beq $t2, $t1, fctJR
+		
 		li $t2, 0x03
 		beq $t2, $t1, fctSRA
 		
@@ -976,162 +1475,189 @@ MIPStoARM:
 		li $t2, 0x02
 		beq $t2, $t1, fctSRL
 		
-		sll $t2, $t2, 1
+		li $t2, 0x4
 		beq $t2, $t1, fctSLLV
 		
-		sll $t2, $t2, 1
+		li $t2, 0x6
 		beq $t2, $t1, fctSRLV
-		
-		sll $t2, $t2, 1
-		beq $t2, $t1, fctJR
 		
 		j fctINVALID
 	
 	fctOR:
-		
-# 		rsData: .word 0x0
-# 		rtData: .word 0x0
-# 		rdData: .word 0x0
-# 		shamtData: .word 0x0
-# 		addressData: .word 0x0
-		
 		#  => 1110 0001 1000 (rsData->ARM) (rdData->ARM) 0000 0000 (rtData->ARM)
-		
-		#	$a0 => location in memory to value of register number in MIPS
-		#	$v0 <= register number in ARM
-		
-		#  Perform register translation
-		# la $a0, rsData
-		# jal convertMIPStoARMregister
-		# move $t3, $v0
-		# 
-		# la $a0, rdData
-		# jal convertMIPStoARMregister
-		# move $t4, $v0
-		# 
-		# la $a0, rtData
-		# jal convertMIPStoARMregister
-		# move $t5, $v0
-		
-		li $a0, 0xE18 #  Begin translation
+		li $a0, 0xE18
 		jal rrOperation
 		
 		move $t0, $v0
-		
-		# sll $t6, $t6, 0x4
-		
-		# #  Add the rsData
-		# 		or $t6, $t6, $t3
-		# 		
-		# 		sll $t6, $t6, 0x4
-		# 		
-		# 		#  Add the rdData
-		# 		or $t6, $t6, $t4
-		# 		
-		# 		sll $t6, $t6, 0xC
-		# 		
-		# 		#  Add the rtData
-		# 		or $t6, $t6, $t5
 		
 		j endOP
 		
 	fctSRA:
+		# => 1110 0001 1010 (rtData->ARM) (rdData->ARM) (shamtData) 010 (rtData->ARM)
+		# 
+		li $a0, 0xE1A
+		li $a1, 0x2
+		jal rriShiftOperation
+		
+		move $t0, $v0
 		
 		j endOP
+		
 	fctADD:
-		
-		j endOP
-	fctSUB:
-		
-		j endOP
-	
-	fctAND:
-				#  => 1110 0000 0000 (rsData->ARM) (rdData->ARM) 0000 0000 (rtData->ARM)
-		
-		# #  Perform register translation
-		# la $a0, rsData
-		# jal convertMIPStoARMregister
-		# move $t3, $v0
-		# 
-		# la $a0, rdData
-		# jal convertMIPStoARMregister
-		# move $t4, $v0
-		# 
-		# la $a0, rtData
-		# jal convertMIPStoARMregister
-		# move $t5, $v0
-		
-		li $a0, 0xE00 #  Begin translation
+		#  => 1110 0000 1000 (rsData->ARM) (rdData->ARM) 0000 0000 (rtData->ARM)
+		li $a0, 0xE08
 		jal rrOperation
 		
 		move $t0, $v0
 		
-		# sll $t6, $t6, 0x4
+		j endOP
 		
-		# #  Add the rsData
-		# or $t6, $t6, $t3
-		# 
-		# sll $t6, $t6, 0x4
-		# 
-		# #  Add the rdData
-		# or $t6, $t6, $t4
-		# 
-		# sll $t6, $t6, 0xC
-		# 
-		# #  Add the rtData
-		# or $t6, $t6, $t5
+	fctSUB:
+		#  => 1110 0000 0100 (rsData->ARM) (rdData->ARM) 0000 0000 (rtData->ARM)
+		li $a0, 0xE04
+		jal rrOperation
+		
+		move $t0, $v0
 		
 		j endOP
-	
+		
+	fctAND:
+		#  => 1110 0000 0000 (rsData->ARM) (rdData->ARM) 0000 0000 (rtData->ARM)
+		li $a0, 0xE00
+		jal rrOperation
+		
+		move $t0, $v0
+		
+		j endOP
+		
 	fctSRL:
+		# => 1110 0001 1010 (rtData->ARM) (rdData->ARM) (shamtData) 001 (rtData->ARM)
+		# 
+		li $a0, 0xE1A
+		li $a1, 0x1
+		jal rriShiftOperation
+		
+		move $t0, $v0
 		
 		j endOP
-	
+		
 	fctSLL:
+		# => 1110 0001 1010 (rtData->ARM) (rdData->ARM) (shamtData) 000 (rtData->ARM)
+		# 
+		li $a0, 0xE1A
+		li $a1, 0x0
+		jal rriShiftOperation
+		
+		move $t0, $v0
 		
 		j endOP
-	
+		
 	fctSLLV:
+		# => 1110 0001 1010 (rtData->ARM) (rdData->ARM) (rsData->ARM) 1 00 (rtData->ARM)
+		# 
+		li $a0, 0xE1A
+		li $a1, 0x0
+		jal rrrShiftOperation
+		
+		move $t0, $v0
 		
 		j endOP
-	
+		
 	fctSRLV:
+		# => 1110 0001 1010 (rtData->ARM) (rdData->ARM) (rsData->ARM) 1 01 (rtData->ARM)
+		# 
+		li $a0, 0xE1A
+		li $a1, 0x1
+		jal rrrShiftOperation
+		
+		move $t0, $v0
 		
 		j endOP
 	
 	fctJR:
+		li $a0, 0xE
+		jal jumpOperation
+		
+		move $t0, $v0
 		
 		j endOP
 	
 	fctANDI:
+		#  => 1110 0010 0000 (rsData->ARM) (rdData->ARM) (rotateData) (immData)
+		# $a0 => address to mips instruction
+		# parseIType
+		li $a0, 0xE20
+		jal riOperation
+		
+		move $t0, $v0
 		
 		j endOP
-	
+		
 	fctORI:
+		# TODO: Write fctORI
+		# => 1110 0011 1000 (rsData->ARM) (rdData->ARM) (rotateData) (immData)
+		# 
+		li $a0, 0xE38
+		jal riOperation
+		
+		move $t0, $v0
 		
 		j endOP
-	
+		
+	fctADDI:
+		# => 1110 0010 1000 (rsData->ARM) (rdData->ARM) (rotateData) (immData)
+		# 
+		li $a0, 0xE28
+		jal riOperation
+		
+		move $t0, $v0
+		
+		j endOP
+		
 	fctBGEZ:
+		# TODO: Write fctBGEZ
+		#  Already parsed I type instruction foramat. Available data:
+		#  
+		#  addressData
+		#  rtData
+		#  rsData
+		#  
 		
-		j endOP
+		
+		j fctINVALID
 	
 	fctBEQ:
-		
-		j endOP
+		# TODO: Write fctBEQ
+		j fctINVALID
 	
-	fctADDI:
-		
-		j endOP
-		
+
 	fctINVALID:
+		#  => 1110 0011 1010 (rsData->ARM) (rdData->ARM) 0000 0000 (rtData->ARM)
+		li $a0, 0xE1A
+		sw $0, rotateData
+		sw $0, immData
+		sw $0, rsData
+		sw $0, rdData
+		
+		jal riOperation
+		
+		move $t0, $v0
+		
+		j kdone
 		
 	endOP:
+	
+	li $t1, -1
+	beq $t1, $t0, fctINVALID
+	
+	kdone:
 	
 	sw $t0, 0($t9)
 	
 	#  FINISHED PROCESSING
 	addi $s0, $s0, 0x4
 	addi $t9, $t9, 4
+	addi $t8, $t8, 1
 	j beginTranslation
 	
 	hitSentinel:
