@@ -420,12 +420,13 @@ branchTree: .word 0x0
 #  allocateARMword
 #  -------------------------
 #
-#  The address of the allocation will be stored in armAddress
+#  This function allocate the number of words passed to it, as well as storing the address into armAddress
 #
 #  $a0 => Number of ARM instructions to allocate for (1 per word)
 #
 
 allocateARMword:
+	#  Prepare the stack
 	addi $sp, $sp, -4
 	sw $fp, 0($sp)
 	move $fp, $sp
@@ -446,7 +447,7 @@ allocateARMword:
 	li $t0, 0x4
 	mult $a0, $t0
 	
-	#  Perform the allocation
+	#  Perform the allocation using sbrk
 	mflo $a0
 	li $v0, 9
 	syscall
@@ -458,11 +459,11 @@ allocateARMword:
 	#  Zero the data segment
 	li $t0, 0x1
 	zeroLoop:
-		beq $t0, $a0, EndzeroLoop
-		sw $0, 0($v0)
-		addi $v0, $v0, 4
-		addi $t0, $t0, 0x1
-		j zeroLoop
+		beq $t0, $a0, EndzeroLoop #  Am I at the end of the data segment?
+		sw $0, 0($v0)  #  Store a zero into the word
+		addi $v0, $v0, 4 #  Increment the address we are storing zeros to
+		addi $t0, $t0, 0x1 #  Increment the counter of the segment we are on
+		j zeroLoop #  Loop
 	EndzeroLoop:
 	
 	#  Restore values
@@ -479,6 +480,9 @@ allocateARMword:
 #
 #	computeRotate
 #	-----------------------
+#
+#	Based on an input of the address for the immediate field that we are converting into a rotated field, 
+#
 #
 #	$a0 => address to immediate value to have the rotation computed
 #
@@ -1112,12 +1116,17 @@ processOffset:
 	lw $fp, -4($sp)
 	jr $ra
 
+# 
 # countInstructions
 # 
-# $a0 => address of first instruction
-# $v0 <= number of corrasponding ARM instructions
+#  counts the number of MIPS instructions and additionally computes the amount of instructions that will be needed for branch instructions. The secondary purpose of this is to generate the seconday table that is used to store information about the relative index of a said instruction to another branch style instrucion to be used in the processOffset method.
+#
+#  $a0 => address of first instruction
+#  $v0 <= number of corrasponding ARM instructions
+# 
 
 countInstructions:
+	#  Prepare the stack
 	addi $sp, $sp, -4
 	sw $fp, 0($sp)
 	move $fp, $sp
@@ -1133,17 +1142,15 @@ countInstructions:
 	sw $t4, -28($fp)
 	sw $t5, -32($fp)
 	
-	li $t0, 0x0
-	li $t1, -1
+	li $t0, 0x0 #  The counter for the number of instructions
+	li $t1, -1 #  The ending character
 	ciLoop:
-		lw $t2, 0($a0)
-		beq $t2, $t1, DciLoop
-		addi $t0, $t0, 0x1
+		lw $t2, 0($a0) #  Load the instruction
+		beq $t2, $t1, DciLoop #  Check if it is equal to the ending character
+		addi $t0, $t0, 0x1 #  Add one to the inst count
+		addi $a0, $a0, 0x4 #  Add 4 to the data segment pointer
 		
-		srl $t3, $t2, 26
-		#  Op code stored in $t3, $t2+ free
-		
-		addi $a0, $a0, 0x4
+		srl $t3, $t2, 26 #  Isolate the op code
 		
 		#  As branch instructions take 2 ARM operations, check if ARM, and add 1
 		li $t2, 0x1
@@ -1152,30 +1159,31 @@ countInstructions:
 		sll $t2, $t2, 0x2
 		beq $t2, $t3, ciBranch
 		
-		j ciLoop
+		j ciLoop #  Loop
 		
 		ciBranch:
-			addi $t0, $t0, 0x1
+			#  Looks like its a branch instruction
+			addi $t0, $t0, 0x1 #  Add one to the inst count
 		
-		j ciLoop
+		j ciLoop #  Loop
 	DciLoop:
 	
-	sw $t0, armCount
+	sw $t0, armCount #  Store the count into memory
 	
 	#  Allocate armCount bytes
 	li $v0, 9
 	move $a0, $t0
 	syscall
 		
-	sw $v0, branchTree
+	sw $v0, branchTree #  Store the base of the branchTree into memory
 	
-	lw $a0, -24($fp)
-	li $t1, -1
+	lw $a0, -24($fp) #  Reload the first argument to the function from memory
+	li $t1, -1 #  Redeclare the ending character
 	li $t4, 0x0
 	la $t5, branchTree
 	ciLoop2:
-		lw $t2, 0($a0)
-		beq $t2, $t1, DciLoop2
+		lw $t2, 0($a0) #  Load the value of 
+		beq $t2, $t1, DciLoop2 #  Check if the ending character
 			
 		srl $t3, $t2, 26
 		#  Op code stored in $t3, $t2+ free
@@ -1393,6 +1401,7 @@ rrrShiftOperation:
 	jr $ra
 
 MIPStoARM:
+	#  Prepare the stack
 	addi $sp, $sp, -4
 	sw $fp, 0($sp)
 	move $fp, $sp
@@ -1410,76 +1419,70 @@ MIPStoARM:
 	sw $t6, -36($fp)
 	sw $t7, -40($fp)
 	
-	move $s0, $a0
+	move $s0, $a0 #  Backup the variable of $a0 into $s0, as we will be manipulating both seperatly
 	
-	#  Count the number of instructions, return to $v0
-	jal countInstructions
+	jal countInstructions #  Count the number of instructions, return to $v0
 	
-	#  Number of ARM instructions now available in $v0
-	move $a0, $v0
+	move $a0, $v0 #  Number of ARM instructions now available in $v0
 	
-	#  Allocate a contingeous memory store for all the ARM instructions
-	jal allocateARMword
+	jal allocateARMword #  Allocate a contingeous memory store for all the ARM instructions
 	
-	#  Address of memory store at armAddress:
-	lw $t9, armAddress
+	lw $t9, armAddress #  Address of memory store at armAddress:
 	
-	#  Address space offset (0 indexed)
-	li $t8, 0x0
+	li $t8, 0x0 #  Address space offset (0 indexed)
 	
 	beginTranslation:
 	
-	li $t1, -1
-	lw $t0, 0($s0)
-	#  $t0 now contains the full call
+	lw $t0, 0($s0) #  Load the MIPS instruction into $t0
 	
-	beq $t0, $t1, hitSentinel
+	li $t1, -1 #  Value for the Sentinel
+	beq $t0, $t1, hitSentinel #  Check if it matches
 	
 	#  Step 1: Check type of operation, check (31-26)
-	srl $t1, $t0, 26
-	#  $t1 now holds the op code
+	srl $t1, $t0, 26 #  store op code into $t1
 	
+	#  Check if it matches a 0 style op code
 	#  0000 00 => (AND | OR | ADD | SUB | SRA | SRL | SLL | SRLV | SLLV | JR)
 	beqz $t1, opZero
 	
+	#  As the remaining operations are of I type, parse the I type instructions early
 	move $a0, $s0 #  Move the address of the instruction into $a0
-	jal parseIType
+	jal parseIType #  Parse the I type instruction, loading the values for the field into memory
 	
 	#  0000 01 => (BGEZ)
 	li $t2, 0x1
-	beq $t1, $t2, fctBGEZ
+	beq $t1, $t2, fctBGEZ #  Check if it matches a BGEZ
 	
 	#  0001 00 => (BEQ)
 	li $t2, 0x4
-	beq $t1, $t2, fctBEQ
+	beq $t1, $t2, fctBEQ #  Check if it matches a BEQ
 	
 	#  The following commands require the rotation to be calculated, parseIType called above will return -1 into $v0 if the computation of the rotation values goes astray. Therefore it is crutial to check to see if the rotation was computed, else print the no-op
 	li $t2, -1
-	beq $t2, $v0, fctINVALID
+	beq $t2, $v0, fctINVALID #  Check if the I type translation was sucesfull
 	
 	#  0011 00 => 0xC (ANDI)
 	li $t2, 0xC
-	beq $t1, $t2, fctANDI
+	beq $t1, $t2, fctANDI #  Check if it matches a ANDI
 	
 	#  0011 01 => (ORI)
 	li $t2, 0xD
-	beq $t1, $t2, fctORI
+	beq $t1, $t2, fctORI #  Check if it matches a ORI
 	
 	#  0010 00 => (ADDI)
 	li $t2, 0x8
-	beq $t1, $t2, fctADDI
+	beq $t1, $t2, fctADDI #  Check if it matches a ADDI
 	
-	j fctINVALID
+	j fctINVALID #  As it does not match any of the above instructions, print an invalid function
 	
 	opZero:
-		#  Load the information into memeory, parsing, all opcodes with 0 is automatically a R type instruction
-		
+		#  As all instructions that have an op code of zero are R type instructions, parse the R type instruction
 		move $a0, $s0 #  Move the address of the instruction into $a0
 		jal parseRType
 		
+		#  Shift the function code into $t1 from the full function call in $t0
 		sll $t1, $t0, 26
 		srl $t1, $t1, 26
-		#  Now have the function code in $t1
 		
 		# 0x00 => (SLL)
 		# 0x03 => (SRA)
@@ -1492,6 +1495,8 @@ MIPStoARM:
 		# 0x06 => (SRLV)
 		# 0x08 => (JR)
 		
+		#  Match the operation to the function code as described in the table above
+		
 		beqz $t1, fctSLL
 		
 		li $t2, 0x8
@@ -1503,13 +1508,13 @@ MIPStoARM:
 		li $t2, 0x20
 		beq $t2, $t1, fctADD
 		
-		addi $t2, 0x02
+		li $t2, 0x22
 		beq $t2, $t1, fctSUB
 		
-		addi $t2, 0x02
+		li $t2, 0x24
 		beq $t2, $t1, fctAND
 		
-		addi $t2, 0x01
+		li $t2, 0x25
 		beq $t2, $t1, fctOR
 		
 		li $t2, 0x02
@@ -1521,281 +1526,298 @@ MIPStoARM:
 		li $t2, 0x6
 		beq $t2, $t1, fctSRLV
 		
+		#  If it does not match any of the above function types for a 0x0 op code instruction, print an invalid function
 		j fctINVALID
 	
 	fctOR:
 		#  => 1110 0001 1000 (rsData->ARM) (rdData->ARM) 0000 0000 (rtData->ARM)
+		#  1110 0001 1000 => 0xE18
+		#  
+		#  As this matches the OR function, load the prefix to the instruction 0xE18 into $a0 for processing by 0xE18
+		#  
 		li $a0, 0xE18
 		jal rrOperation
 		
-		move $t0, $v0
+		move $t0, $v0 #  Move the value of the ARM instruction into the $t0 reg
 		
 		j endOP
 		
 	fctSRA:
 		# => 1110 0001 1010 (rtData->ARM) (rdData->ARM) (shamtData) 010 (rtData->ARM)
-		# 
+		#  1110 0001 1010 => 0xE1A
+		#  
+		#  As this matches the SRA function, load the prefix to the instruction 0xE1A into $a0 for processing by 0xE1A
+		#  
 		li $a0, 0xE1A
 		li $a1, 0x2
 		jal rriShiftOperation
 		
-		move $t0, $v0
+		move $t0, $v0 #  Move the value of the ARM instruction into the $t0 reg
 		
 		j endOP
 		
 	fctADD:
 		#  => 1110 0000 1000 (rsData->ARM) (rdData->ARM) 0000 0000 (rtData->ARM)
+		#  1110 0000 1000 => 0xE08
+		#  
+		#  As this matches the ADD function, load the prefix to the instruction 0xE08 into $a0 for processing by 0xE08
+		#  
 		li $a0, 0xE08
 		jal rrOperation
 		
-		move $t0, $v0
+		move $t0, $v0 #  Move the value of the ARM instruction into the $t0 reg
 		
 		j endOP
 		
 	fctSUB:
 		#  => 1110 0000 0100 (rsData->ARM) (rdData->ARM) 0000 0000 (rtData->ARM)
+		#  1110 0000 0100 => 0xE04
+		#  
+		#  As this matches the SUB function, load the prefix to the instruction 0xE08 into $a0 for processing by 0xE04
+		#  
 		li $a0, 0xE04
 		jal rrOperation
 		
-		move $t0, $v0
+		move $t0, $v0 #  Move the value of the ARM instruction into the $t0 reg
 		
 		j endOP
 		
 	fctAND:
 		#  => 1110 0000 0000 (rsData->ARM) (rdData->ARM) 0000 0000 (rtData->ARM)
+		#  1110 0000 0000 => 0xE00
+		#  
+		#  As this matches the AND function, load the prefix to the instruction 0xE08 into $a0 for processing by 0xE00
+		#  
 		li $a0, 0xE00
 		jal rrOperation
 		
-		move $t0, $v0
+		move $t0, $v0 #  Move the value of the ARM instruction into the $t0 reg
 		
 		j endOP
 		
 	fctSRL:
-		# => 1110 0001 1010 (rtData->ARM) (rdData->ARM) (shamtData) 001 (rtData->ARM)
-		# 
+		#  => 1110 0001 1010 (rtData->ARM) (rdData->ARM) (shamtData) 001 (rtData->ARM)
+		#  1110 0000 1010 => 0xE08
+		#  
+		#  As this matches the SRL function, load the prefix to the instruction 0xE08 into $a0 for processing by 0xE18
+		#  
 		li $a0, 0xE1A
 		li $a1, 0x1
 		jal rriShiftOperation
 		
-		move $t0, $v0
+		move $t0, $v0 #  Move the value of the ARM instruction into the $t0 reg
 		
 		j endOP
 		
 	fctSLL:
-		# => 1110 0001 1010 (rtData->ARM) (rdData->ARM) (shamtData) 000 (rtData->ARM)
-		# 
+		#  => 1110 0001 1010 (rtData->ARM) (rdData->ARM) (shamtData) 000 (rtData->ARM)
+		#  1110 0001 1010 => 0xE1A
+		#  
+		#  As this matches the SLL function, load the prefix to the instruction 0xE08 into $a0 for processing by 0xE1A
+		#  
 		li $a0, 0xE1A
 		li $a1, 0x0
 		jal rriShiftOperation
 		
-		move $t0, $v0
+		move $t0, $v0 #  Move the value of the ARM instruction into the $t0 reg
 		
 		j endOP
 		
 	fctSLLV:
-		# => 1110 0001 1010 (rtData->ARM) (rdData->ARM) (rsData->ARM) 1 00 (rtData->ARM)
-		# 
+		#  => 1110 0001 1010 (rtData->ARM) (rdData->ARM) (rsData->ARM) 1 00 (rtData->ARM)
+		#  1110 0001 1010 => 0xE1A
+		#  
+		#  As this matches the SLLV function, load the prefix to the instruction 0xE08 into $a0 for processing by 0xE1A
+		#  
 		li $a0, 0xE1A
 		li $a1, 0x0
 		jal rrrShiftOperation
 		
-		move $t0, $v0
+		move $t0, $v0 #  Move the value of the ARM instruction into the $t0 reg
 		
 		j endOP
 		
 	fctSRLV:
 		# => 1110 0001 1010 (rtData->ARM) (rdData->ARM) (rsData->ARM) 1 01 (rtData->ARM)
-		# 
+		#  1110 0001 1010 => 0xE1A
+		#  
+		#  As this matches the SRLV function, load the prefix to the instruction 0xE08 into $a0 for processing by 0xE1A
+		#  
 		li $a0, 0xE1A
 		li $a1, 0x1
 		jal rrrShiftOperation
 		
-		move $t0, $v0
+		move $t0, $v0 #  Move the value of the ARM instruction into the $t0 reg
 		
 		j endOP
 	
 	fctJR:
+		#  The jump instruction is prefixed by 0xE
 		li $a0, 0xE
 		jal jumpOperation
 		
-		move $t0, $v0
+		move $t0, $v0 #  Move the value of the ARM instruction into the $t0 reg
 		
 		j endOP
 	
 	fctANDI:
 		#  => 1110 0010 0000 (rsData->ARM) (rdData->ARM) (rotateData) (immData)
-		# $a0 => address to mips instruction
-		# parseIType
+		#  Add Prefix and process using the register + immediete operation method
 		li $a0, 0xE20
 		jal riOperation
 		
-		move $t0, $v0
+		move $t0, $v0 #  Move the value of the ARM instruction into the $t0 reg
 		
 		j endOP
 		
 	fctORI:
 		# => 1110 0011 1000 (rsData->ARM) (rdData->ARM) (rotateData) (immData)
-		# 
+		#  Add Prefix and process using the register + immediete operation method
 		li $a0, 0xE38
 		jal riOperation
 		
-		move $t0, $v0
+		move $t0, $v0 #  Move the value of the ARM instruction into the $t0 reg
 		
 		j endOP
 		
 	fctADDI:
 		# => 1110 0010 1000 (rsData->ARM) (rdData->ARM) (rotateData) (immData)
-		# 
+		#  Add Prefix and process using the register + immediete operation method
 		li $a0, 0xE28
 		jal riOperation
 		
-		move $t0, $v0
+		move $t0, $v0 #  Move the value of the ARM instruction into the $t0 reg
 		
 		j endOP
 		
 	fctBGEZ:
-		# TODO: Write fctBGEZ
-		#  Already parsed I type instruction foramat. Available data:
-		#  
-		#  addressData
-		#  rtData
-		#  rsData
-		#  
+		#  Already parsed I type instruction foramat.
+		#  Add the prefix value to $t2
 		li $t2, 0xE35
 		sll $t2, $t2, 20
 		
+		#  Load the source register data and parse it into the ARM regiser
 		la $a0, rsData
 		jal convertMIPStoARMregister
-	
-		#  Check to see if this was a valid register
-		bltz $v0, fctINVALID
 		
-		sll $v0, $v0, 16
+		bltz $v0, fctINVALID #  Check to see if this was a valid register
 		
-		or $t0, $t2, $v0
+		sll $v0, $v0, 16 #  Move the result into position
 		
-		sw $t0, 0($t9)
+		or $t0, $t2, $v0 #  Add it to the register that we are compiling the ARM instruction
 		
-		addi $t8, $t8, 1
-		addi $t9, $t9, 4
+		sw $t0, 0($t9) #  Store the CMP operation into the data segment
 		
-		#  $a1 <= offset address to be processed
-		#  $a0 <= current inst offset
-		#  $v0 => new offset
-		# #  $a1 <= offset address to be processed
-		move $a0, $t8
-		la $a1, addressData
-		jal processOffset
-		#  $v0 <= converted offset
+		addi $t8, $t8, 1 #  Add one to the inst count reference
+		addi $t9, $t9, 4 #  Add 4 to the data segment pointer
 		
-		li $t0, 0xAA
-		sll $t0, $t0, 24
+		move $a0, $t8 #  Move the value of the inst count reference into $a0
+		la $a1, addressData #  Move the address of the addressData into $a1
+		jal processOffset #  Translate the offset from a MIPS offset into a ARM offset
 		
-		or $t0, $t0, $v0
+		li $t0, 0xAA #  Load the prefix of the BGEZ operation
+		sll $t0, $t0, 24 #  Shift it into position
 		
-		sw $t0, 0($t9)
+		or $t0, $t0, $v0 #  Add it to the register that we are compiling the ARM instruction
+		
+		sw $t0, 0($t9) #  Store the BGEZ instruction in the data segment
 		
 		#  FINISHED PROCESSING
-		addi $s0, $s0, 0x4
-		addi $t9, $t9, 4
-		addi $t8, $t8, 1
+		addi $s0, $s0, 0x4 #  Add 4 to the MIPS reading pointer
+		addi $t9, $t9, 4 #  Add 4 to the data segment pointer
+		addi $t8, $t8, 1 #  Add one to the inst count reference
 		
-		j beginTranslation
+		j beginTranslation #  Loop
 	
 	fctBEQ:
-		# TODO: Write fctBGEZ
-		#  Already parsed I type instruction foramat. Available data:
-		#  
-		#  addressData
-		#  rtData
-		#  rsData
-		#  
+		#  Already parsed I type instruction foramat.
+		#  Add the prefix value to $t2
 		li $t2, 0xE15
 		sll $t2, $t2, 20
 		
+		#  Load the source register data and parse it into the ARM regiser
 		la $a0, rsData
 		jal convertMIPStoARMregister
-	
-		#  Check to see if this was a valid register
-		bltz $v0, fctINVALID
 		
-		sll $v0, $v0, 16
+		bltz $v0, fctINVALID #  Check to see if this was a valid register
 		
-		or $t0, $t2, $v0
+		sll $v0, $v0, 16 #  Move the result into position
 		
+		or $t0, $t2, $v0 #  Add it to the register that we are compiling the ARM instruction
+		
+		#  Load the comparison data into the $a0 register to convert from MIPS to arm style register
 		la $a0, rtData
-		
 		jal convertMIPStoARMregister
-	
-		#  Check to see if this was a valid register
-		bltz $v0, fctINVALID
 		
-		or $t0, $t0, $v0
+		bltz $v0, fctINVALID #  Check to see if this was a valid register
 		
-		sw $t0, 0($t9)
+		or $t0, $t0, $v0 #  Add it to the register that we are compiling the ARM instruction
 		
-		addi $t8, $t8, 1
-		addi $t9, $t9, 4
+		sw $t0, 0($t9) #  Store the CMP operation into the data segment
 		
-		#  $a1 <= offset address to be processed
-		#  $a0 <= current inst offset
-		#  $v0 => new offset
-		# #  $a1 <= offset address to be processed
-		move $a0, $t8
-		la $a1, addressData
-		jal processOffset
-		#  $v0 <= converted offset
+		addi $t8, $t8, 1 #  Add one to the inst count reference
+		addi $t9, $t9, 4 #  Add 4 to the data segment pointer
 		
-		li $t0, 0x0A
-		sll $t0, $t0, 24
+		move $a0, $t8 #  Move the value of the inst count reference into $a0
+		la $a1, addressData #  Move the address of the addressData into $a1
+		jal processOffset #  Translate the offset from a MIPS offset into a ARM offset
 		
-		or $t0, $t0, $v0
+		li $t0, 0x0A #  Load the prefix of the BEQ operation
+		sll $t0, $t0, 24 #  Shift it into position
 		
-		sw $t0, 0($t9)
+		or $t0, $t0, $v0 #  Add it to the register that we are compiling the ARM instruction
+		
+		sw $t0, 0($t9) #  Store the BEQ instruction in the data segment
 		
 		#  FINISHED PROCESSING
-		addi $s0, $s0, 0x4
-		addi $t9, $t9, 4
-		addi $t8, $t8, 1
+		addi $s0, $s0, 0x4 #  Add 4 to the MIPS reading pointer
+		addi $t9, $t9, 4 #  Add 4 to the data segment pointer
+		addi $t8, $t8, 1 #  Add one to the inst count reference
 		
-		j beginTranslation
+		j beginTranslation #  Loop
 		
 	
 
 	fctINVALID:
 		#  => 1110 0011 1010 (rsData->ARM) (rdData->ARM) 0000 0000 (rtData->ARM)
 		li $a0, 0xE1A
+		
+		#  Zero all data register to ensure that R0 is the only register printned
 		sw $0, rotateData
 		sw $0, immData
 		sw $0, rsData
 		sw $0, rtData
 		
+		#  Parse the above data as a ri operation, with the offset mentioned above, it will interpret it as a MOV
 		jal riOperation
 		
-		move $t0, $v0
+		move $t0, $v0 #  Move the value of the ARM instruction into the $t0 reg
 		
-		j kdone
+		j kdone #  Loop
 		
 	endOP:
 	
+	#  Check to see if any operation was unsucesfull, if so, just print a Invalid function
 	li $t1, -1
 	beq $t1, $t0, fctINVALID
 	
 	kdone:
 	
-	sw $t0, 0($t9)
+	sw $t0, 0($t9) #  Store the ARM instruction into the data segment
 	
 	#  FINISHED PROCESSING
-	addi $s0, $s0, 0x4
-	addi $t9, $t9, 4
-	addi $t8, $t8, 1
-	j beginTranslation
+	addi $s0, $s0, 0x4 #  Add 4 to the MIPS reading pointer
+	addi $t9, $t9, 4 #  Add 4 to the data segment pointer
+	addi $t8, $t8, 1 #  Add one to the inst count reference
+	j beginTranslation #  Loop
 	
 	hitSentinel:
-		
+	
+	#  Prepare the values for the return as per requested by the spec
 	lw $v0, armCount
 	lw $v1, armAddress
 	
+	#  Restore the values from the stack
 	lw $ra, -4($fp)
 	lw $s0, -8($fp)
 	lw $t0, -12($fp)
