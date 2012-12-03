@@ -923,9 +923,9 @@ riOperation:
 #  jumpOperation
 #  ------------------------
 #
+#	Will compute the jump instruction format from MIPS to ARM
+#
 #  $a0 => condition code of jump
-#s
-#  Will read data from memory for the specific registers
 #
 #  $v0 <= ARM operation translated
 
@@ -940,33 +940,31 @@ jumpOperation:
 	sw $t0, -8($fp)
 	sw $a0, -12($fp)
 	
-	#  Shift condition to the left by 28 bits
-	sll $t0, $a0, 28
+	sll $t0, $a0, 28 #  Shift condition to the left by 28 bits
 	
-	li $t1, 0x12F
+	li $t1, 0x12F #  Add command prefix
 	sll $t1, $t1, 16
 	
-	or $t0, $t0, $t1
+	or $t0, $t0, $t1 #  Merge it with the condtion bits
 	
-	li $t1, 0xFF1
+	li $t1, 0xFF1 #  Add third jump instruction
 	sll $t1, $t1, 4
 	
-	or $t0, $t0, $t1
+	or $t0, $t0, $t1 #  concat data
 	
-	la $a0, rsData
+	la $a0, rsData #  Load source register
 	jal convertMIPStoARMregister
+	bltz $v0, joInvalid #  Check to see if this was a valid register
 	
-	#  Check to see if this was a valid register
-	bltz $v0, joInvalid
-	
-	or $v0, $t0, $v0
+	or $v0, $t0, $v0 #  Add to the command
 	
 	j joExit
 	
 	joInvalid:
-		li $v0, -1
+		li $v0, -1 #  Load a -1 to indicate an invalid instruction
 	joExit:
 	
+	#  Restore the stack values
 	lw $ra, -4($fp)
 	lw $t0, -8($fp)
 	lw $a0, -12($fp)
@@ -997,39 +995,37 @@ computeOffset:
 	sw $t3, -20($fp)
 	sw $t4, -24($fp)
 	
-	la $t0, branchTree
-	add $t0, $t0, $a0
-	addi $t0, $t0, 1
+	la $t0, branchTree #  Load the base of the reference tree
+	add $t0, $t0, $a0 #  Add the current inst offset to the base
+	addi $t0, $t0, 1  #  As the PC will be in the second point anyways, lets do the same to have accurate results
 	
-	li $t2, 0x0 #  Our val variable
+	li $t2, 0x0 #  Our val variable, our new offset to be calculated...
 	
-	beq $a1, $0, cpZero
+	beq $a1, $0, cpZero #  Check if the offset is zero...
 	
-	li $t1, 0x4
+	li $t1, 0x4  #  Divide the offset by 4, to get the number of inst we are jumping
 	div $a1, $t1
 	
-	mfhi $t1
-	
+	mfhi $t1  #  Check if there is remainder (not word aligned) and error	
 	bnez $t1, cpErr
 	
-	mflo $t1 #  Our Index variable
-	
-	bgtz $a1, cpPos
+	mflo $t1 #  Our Index variable, our number of jumps pre corrected index scheme
+	bgtz $a1, cpPos #  Check if it is a forward traversal
 	
 	cpNeg:
-		beqz $t1, cpExit
+		beqz $t1, cpExit #  Check if the value of the index is zero
 		
-		add $t3, $t0, $t2
-		lb $t3, 0($t3)
+		add $t3, $t0, $t2 #  Add the base to the value of the value varialbe
+		lb $t3, 0($t3) #  Load the info at that element of the tree
 		
-		addi $t2, $t2, -1
+		addi $t2, $t2, -1 #  Decrement the value for the index
 		
-		li $t4, 2
+		li $t4, 2 #  If it is two, then its a CMP instruction, so keep going, theres nothing to see...
 		beq $t4, $t3, cpNeg
 		
-		addi $t1, $t1, 1
+		addi $t1, $t1, 1 #  Increaase the value for the index
 		
-		j cpNeg
+		j cpNeg #  Loop
 	cpPos:
 		beqz $t1, cpExit
 			
@@ -1048,11 +1044,11 @@ computeOffset:
 	cpErr:
 	cpExit:
 		
-	li $t1, 0x4
+	li $t1, 0x4 #  Mult the value of the number of jumps by 4 to get the address offset
 	mult $t2, $t1
+	mflo $v0 #  Move the mult 4 value into the return register
 	
-	mflo $v0
-	
+	#  Restore the values from the stack
 	lw $ra, -4($fp)
 	lw $t0, -8($fp)
 	lw $t1, -12($fp)
