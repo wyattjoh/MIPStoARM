@@ -1027,17 +1027,17 @@ computeOffset:
 		
 		j cpNeg #  Loop
 	cpPos:
-		beqz $t1, cpExit
+		beqz $t1, cpExit #  Check if the value of the index is zero
 			
-		add $t3, $t0, $t2
-		lb $t3, 0($t3)
+		add $t3, $t0, $t2 #  Add the base to the value of the value varialbe
+		lb $t3, 0($t3) #  Load the info at that element of the tree
 			
-		addi $t2, $t2, 1
+		addi $t2, $t2, 1 #  Add the value for the index
 			
-		li $t4, 1
+		li $t4, 1 #  If it is one, then its a Branch instruction, so keep going, theres nothing to see...
 		beq $t4, $t3, cpPos
 			
-		addi $t1, $t1, -1
+		addi $t1, $t1, -1 #  Decrement the value for the index
 			
 		j cpPos
 	cpZero:
@@ -1064,11 +1064,14 @@ computeOffset:
 #  processOffset
 #  ---------------------
 #  
+#  Header function calls necessary for the computeOffset method
+#
 #  $a1 <= offset address to be processed
 #  $a0 <= current inst offset
 #  $v0 => new offset
 
 processOffset:
+	#  Prepare the stack
 	addi $sp, $sp, -4
 	sw $fp, 0($sp)
 	move $fp, $sp
@@ -1077,18 +1080,19 @@ processOffset:
 	#  Store the values
 	sw $ra, -4($fp)
 	
-	lw $a1, 0($a1)
+	lw $a1, 0($a1) #  Load the value for the offset
 	
-	sll $a1, $a1, 16
+	sll $a1, $a1, 16 #  Shift the offset imm field as per design
 	sra $a1, $a1, 14
 	
 	# addi $a0, $a0, 1
 	
-	jal computeOffset
+	jal computeOffset #  Compute offset => $v0
 	
-	sll $v0, $v0, 6
+	sll $v0, $v0, 6 #  Reverse afeomentioned shifting
 	srl $v0, $v0, 8
 	
+	#  Rewind the stack values
 	lw $ra, -4($fp)
 	#  Unwind the stack
 	addi $sp, $sp, 8
@@ -1251,10 +1255,8 @@ rriShiftOperation:
 	
 	#  Insert rDestination Data
 	la $a0, rdData
-	jal convertMIPStoARMregister
-	
-	#  Check to see if this was a valid register
-	bltz $v0, rrisoInvalid
+	jal convertMIPStoARMregister #  Check to see if this was a valid register
+	bltz $v0, rrisoInvalid 
 	
 	sll $v0, $v0, 12
 	or $t0, $v0, $t0
@@ -1262,7 +1264,7 @@ rriShiftOperation:
 	#  Insert Shift Amount Data
 	lw $v0, shamtData
 	
-	sll $v0, $v0, 7
+	sll $v0, $v0, 7 #  Add the value to the register
 	or $t0, $v0, $t0
 	
 	#  Insert shift type
@@ -1271,23 +1273,22 @@ rriShiftOperation:
 	
 	#  Insert rSource Data
 	la $a0, rtData
-	jal convertMIPStoARMregister
-	
-	#  Check to see if this was a valid register
+	jal convertMIPStoARMregister #  Check to see if this was a valid register
 	bltz $v0, rrisoInvalid
 	
-	sll $a0, $v0, 16
+	sll $a0, $v0, 16 #  Add the value to the register
 	or $t0, $a0, $t0
 	or $t0, $v0, $t0
 	
-	move $v0, $t0
+	move $v0, $t0 #  prepare the return value
 	
 	j rrisoExit
 	
 	rrisoInvalid:
-		li $v0, -1
+		li $v0, -1 #  If -1, then later methods will determine it to be in an error state, and respond accordingly
 	rrisoExit:
 	
+	#  Restore values from the stack
 	lw $ra, -4($fp)
 	lw $t0, -8($fp)
 	lw $a0, -12($fp)
@@ -1324,11 +1325,9 @@ rrrShiftOperation:
 	#  Insert rDestination Data
 	la $a0, rdData
 	jal convertMIPStoARMregister
+	bltz $v0, rrrsoInvalid #  Check to see if this was a valid register
 	
-	#  Check to see if this was a valid register
-	bltz $v0, rrrsoInvalid
-	
-	sll $v0, $v0, 12
+	sll $v0, $v0, 12 #  Add the value to the register
 	or $t0, $v0, $t0
 	
 	#  Insert Shift Amount Data
@@ -1338,7 +1337,7 @@ rrrShiftOperation:
 	#  Check to see if this was a valid register
 	bltz $v0, rrrsoInvalid
 	
-	sll $v0, $v0, 8
+	sll $v0, $v0, 8 #  Add the value to the register
 	or $t0, $v0, $t0
 	
 	#  Insert shift type
@@ -1353,15 +1352,13 @@ rrrShiftOperation:
 	#  Insert rSource Data
 	la $a0, rtData
 	jal convertMIPStoARMregister
+	bltz $v0, rrrsoInvalid #  Check to see if this was a valid register
 	
-	#  Check to see if this was a valid register
-	bltz $v0, rrrsoInvalid
-	
-	sll $a0, $v0, 16
+	sll $a0, $v0, 16 #  Add the value to the register
 	or $t0, $a0, $t0
 	or $t0, $v0, $t0
 	
-	move $v0, $t0
+	move $v0, $t0 #  prepare the return value
 	
 	j rrisoExit
 	
@@ -1369,6 +1366,7 @@ rrrShiftOperation:
 		li $v0, -1
 	rrrsoExit:
 	
+	#  Rewind the stack
 	lw $ra, -4($fp)
 	lw $t0, -8($fp)
 	lw $a0, -12($fp)
