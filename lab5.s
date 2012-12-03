@@ -753,7 +753,7 @@ parseIType:
 	#  Masking element
 	li $t1, 0xFF
 	sll $t1, $t1, 8
-	addi $t1, 0xFF
+	ori $t1, $t1, 0xFF
 	
 	and $t2, $t0, $t1
 	
@@ -1011,6 +1011,8 @@ computeOffset:
 	sw $t4, -24($fp)
 	
 	la $t0, branchTree
+	add $t0, $t0, $a0
+	addi $t0, $t0, 1
 	
 	li $t2, 0x0 #  Our val variable
 	
@@ -1058,8 +1060,11 @@ computeOffset:
 	cpZero:
 	cpErr:
 	cpExit:
+		
+	li $t1, 0x4
+	mult $t2, $t1
 	
-	move $v0, $t2
+	mflo $v0
 	
 	lw $ra, -4($fp)
 	lw $t0, -8($fp)
@@ -1069,6 +1074,41 @@ computeOffset:
 	lw $t4, -24($fp)
 	#  Unwind the stack
 	addi $sp, $sp, 28
+	lw $fp, -4($sp)
+	jr $ra
+
+#  
+#  processOffset
+#  ---------------------
+#  
+#  $a1 <= offset address to be processed
+#  $a0 <= current inst offset
+#  $v0 => new offset
+
+processOffset:
+	addi $sp, $sp, -4
+	sw $fp, 0($sp)
+	move $fp, $sp
+	#  Grow the stack
+	addi $sp, $sp, -4
+	#  Store the values
+	sw $ra, -4($fp)
+	
+	lw $a1, 0($a1)
+	
+	sll $a1, $a1, 16
+	sra $a1, $a1, 14
+	
+	# addi $a0, $a0, 1
+	
+	jal computeOffset
+	
+	sll $v0, $v0, 6
+	srl $v0, $v0, 8
+	
+	lw $ra, -4($fp)
+	#  Unwind the stack
+	addi $sp, $sp, 8
 	lw $fp, -4($sp)
 	jr $ra
 
@@ -1594,7 +1634,6 @@ MIPStoARM:
 		j endOP
 		
 	fctORI:
-		# TODO: Write fctORI
 		# => 1110 0011 1000 (rsData->ARM) (rdData->ARM) (rotateData) (immData)
 		# 
 		li $a0, 0xE38
@@ -1622,13 +1661,105 @@ MIPStoARM:
 		#  rtData
 		#  rsData
 		#  
+		li $t2, 0xE35
+		sll $t2, $t2, 20
 		
+		la $a0, rsData
+		jal convertMIPStoARMregister
+	
+		#  Check to see if this was a valid register
+		bltz $v0, fctINVALID
 		
-		j fctINVALID
+		sll $v0, $v0, 16
+		
+		or $t0, $t2, $v0
+		
+		sw $t0, 0($t9)
+		
+		addi $t8, $t8, 1
+		addi $t9, $t9, 4
+		
+		#  $a1 <= offset address to be processed
+		#  $a0 <= current inst offset
+		#  $v0 => new offset
+		# #  $a1 <= offset address to be processed
+		move $a0, $t8
+		la $a1, addressData
+		jal processOffset
+		#  $v0 <= converted offset
+		
+		li $t0, 0xAA
+		sll $t0, $t0, 24
+		
+		or $t0, $t0, $v0
+		
+		sw $t0, 0($t9)
+		
+		#  FINISHED PROCESSING
+		addi $s0, $s0, 0x4
+		addi $t9, $t9, 4
+		addi $t8, $t8, 1
+		
+		j beginTranslation
 	
 	fctBEQ:
-		# TODO: Write fctBEQ
-		j fctINVALID
+		# TODO: Write fctBGEZ
+		#  Already parsed I type instruction foramat. Available data:
+		#  
+		#  addressData
+		#  rtData
+		#  rsData
+		#  
+		li $t2, 0xE15
+		sll $t2, $t2, 20
+		
+		la $a0, rsData
+		jal convertMIPStoARMregister
+	
+		#  Check to see if this was a valid register
+		bltz $v0, fctINVALID
+		
+		sll $v0, $v0, 16
+		
+		or $t0, $t2, $v0
+		
+		la $a0, rtData
+		
+		jal convertMIPStoARMregister
+	
+		#  Check to see if this was a valid register
+		bltz $v0, fctINVALID
+		
+		or $t0, $t0, $v0
+		
+		sw $t0, 0($t9)
+		
+		addi $t8, $t8, 1
+		addi $t9, $t9, 4
+		
+		#  $a1 <= offset address to be processed
+		#  $a0 <= current inst offset
+		#  $v0 => new offset
+		# #  $a1 <= offset address to be processed
+		move $a0, $t8
+		la $a1, addressData
+		jal processOffset
+		#  $v0 <= converted offset
+		
+		li $t0, 0x0A
+		sll $t0, $t0, 24
+		
+		or $t0, $t0, $v0
+		
+		sw $t0, 0($t9)
+		
+		#  FINISHED PROCESSING
+		addi $s0, $s0, 0x4
+		addi $t9, $t9, 4
+		addi $t8, $t8, 1
+		
+		j beginTranslation
+		
 	
 
 	fctINVALID:
@@ -1637,7 +1768,7 @@ MIPStoARM:
 		sw $0, rotateData
 		sw $0, immData
 		sw $0, rsData
-		sw $0, rdData
+		sw $0, rtData
 		
 		jal riOperation
 		
