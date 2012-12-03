@@ -680,6 +680,7 @@ convertMIPStoARMregister:
 #
 
 parseRType:
+	#  Prepare thee stack
 	addi $sp, $sp, -4
 	sw $fp, 0($sp)
 	move $fp, $sp
@@ -692,32 +693,31 @@ parseRType:
 	sw $t2, -16($fp)
 	sw $a0, -20($fp)
 	
-	#  Load the address from memory
-	lw $t0, 0($a0)
+	lw $t0, 0($a0) #  Load the address from memory
 	
-	#  Masking element
-	li $t1, 0x1F
+	li $t1, 0x1F #  Masking element
 	
+	#  Shift out the shamtData
 	srl $t0, $t0, 6
 	and $t2, $t0, $t1
-	
 	sw $t2, shamtData
 	
+	#  Shift out the rdData
 	srl $t0, $t0, 5
 	and $t2, $t0, $t1
-	
 	sw $t2, rdData
 	
+	#  Shift out the rtData
 	srl $t0, $t0, 5
 	and $t2, $t0, $t1
-	
 	sw $t2, rtData
 	
+	#  Shift out the rsData
 	srl $t0, $t0, 5
 	and $t2, $t0, $t1
-	
 	sw $t2, rsData
 	
+	#  Restore the stack data
 	lw $ra, -4($fp)
 	lw $t0, -8($fp)
 	lw $t1, -12($fp)
@@ -732,7 +732,7 @@ parseRType:
 #	parseIType
 #	----------------------
 #	
-#	
+#	Parse the contents of an I type instruction into memory
 #	
 #	$a0 => address to mips instruction
 #
@@ -740,6 +740,7 @@ parseRType:
 #
 
 parseIType:
+	#  Prepare the stack
 	addi $sp, $sp, -4
 	sw $fp, 0($sp)
 	move $fp, $sp
@@ -752,47 +753,37 @@ parseIType:
 	sw $t2, -16($fp)
 	sw $a0, -20($fp)
 	
-	lw $t0, 0($a0)
+	lw $t0, 0($a0) #  Load the MIPS instruction that we are parsing
 	
 	#  Masking element
 	li $t1, 0xFF
 	sll $t1, $t1, 8
 	ori $t1, $t1, 0xFF
 	
-	and $t2, $t0, $t1
-	
-	sw $t2, addressData
+	and $t2, $t0, $t1 #  Mask out the address data
+	sw $t2, addressData #  And store it
 	
 	#  Determine the rotaion values and imm values
-	
-	# rotateData: .word 0x0
-	# immData: .word 0x0
-	
-	#	computeRotate
-	#	$a0 => address to immediate value to have the rotation computed
-	#
-	#	$v0 <= value of the rotation
-	#	$v1 <= value into the immediate field
-	#
 	la $a0, addressData
 	jal computeRotate
 	
-	sw $v0, rotateData
-	sw $v1, immData
+	sw $v0, rotateData #  Store the computed rotateData
+	sw $v1, immData #  And immData
 	
 	#  Masking element
 	li $t1, 0x1F
 	
+	#  Mask out the rtData from the MIPS code
 	srl $t0, $t0, 16
 	and $t2, $t0, $t1
-	
 	sw $t2, rtData
 	
+	#  Mask out the rsData from the MIPS code
 	srl $t0, $t0, 5
 	and $t2, $t0, $t1
-	
 	sw $t2, rsData
 	
+	#  Restore the stack data
 	lw $ra, -4($fp)
 	lw $t0, -8($fp)
 	lw $t1, -12($fp)
@@ -829,40 +820,35 @@ rrOperation:
 	
 	#  Perform register translation
 	
-	la $a0, rsData
-	jal convertMIPStoARMregister
-	
-	#  Check to see if this was a valid register
+	la $a0, rsData #  Translate MIPS register to ARM
+	jal convertMIPStoARMregister #  Check to see if this was a valid register
 	bltz $v0, rroInvalid
 	
-	or $t0, $v0, $t0
+	or $t0, $v0, $t0 #  Add the results to the instruction
 	sll $t0, $t0, 0x4
 		
-	la $a0, rdData
+	la $a0, rdData #  Translate MIPS register to ARM
 	jal convertMIPStoARMregister
+	bltz $v0, rroInvalid #  Check to see if this was a valid register
 	
-	#  Check to see if this was a valid register
-	bltz $v0, rroInvalid
-	
-	or $t0, $v0, $t0
+	or $t0, $v0, $t0 #  Add the results to the instruction
 	sll $t0, $t0, 0xC
 		
-	la $a0, rtData
+	la $a0, rtData #  Translate MIPS register to ARM
 	jal convertMIPStoARMregister
+	bltz $v0, rroInvalid #  Check to see if this was a valid register
 	
-	#  Check to see if this was a valid register
-	bltz $v0, rroInvalid
+	or $t0, $v0, $t0 #  Add the results to the instruction
 	
-	or $t0, $v0, $t0
-	
-	move $v0, $t0
+	move $v0, $t0 #  Prepare the return values
 	
 	j rroExit
 	
 	rroInvalid:
-		li $v0, -1
+		li $v0, -1 #  Load a -1 to indicate an invalid instruction
 	rroExit:
 	
+	#  Restore the stack values
 	lw $ra, -4($fp)
 	lw $t0, -8($fp)
 	lw $a0, -12($fp)
@@ -893,41 +879,38 @@ riOperation:
 	# li $t6, 0xE00 #  Begin translation
 	sll $t0, $a0, 4
 	
-	la $a0, rsData
+	la $a0, rsData #  Translate MIPS register to ARM
 	jal convertMIPStoARMregister
+	bltz $v0, rioInvalid #  Check to see if this was a valid register
 	
-	#  Check to see if this was a valid register
-	bltz $v0, rioInvalid
-	
-	or $t0, $v0, $t0
+	or $t0, $v0, $t0 #  Add the results to the instruction
 	sll $t0, $t0, 0x4
 		
-	la $a0, rtData
+	la $a0, rtData #  Translate MIPS register to ARM
 	jal convertMIPStoARMregister
+	bltz $v0, rioInvalid #  Check to see if this was a valid register
 	
-	#  Check to see if this was a valid register
-	bltz $v0, rioInvalid
-	
-	or $t0, $v0, $t0
+	or $t0, $v0, $t0 #  Add the results to the instruction
 	sll $t0, $t0, 0x4
 	
-	lw $v0, rotateData
+	lw $v0, rotateData #  Load the rotateData
 	
-	or $t0, $v0, $t0
+	or $t0, $v0, $t0 #  Add the results to the instruction
 	sll $t0, $t0, 0x8
 	
-	lw $v0, immData
+	lw $v0, immData #  Load the immData
 	
-	or $t0, $v0, $t0
+	or $t0, $v0, $t0 #  Add the results to the instruction
 	
-	move $v0, $t0
+	move $v0, $t0 #  Prepare the return values
 	
 	j rioExit
 	
 	rioInvalid:
-		li $v0, -1
+		li $v0, -1 #  Load a -1 to indicate an invalid instruction
 	rioExit:
 	
+	#  Restore stack values
 	lw $ra, -4($fp)
 	lw $t0, -8($fp)
 	lw $a0, -12($fp)
@@ -1182,17 +1165,16 @@ countInstructions:
 	li $t4, 0x0
 	la $t5, branchTree
 	ciLoop2:
-		lw $t2, 0($a0) #  Load the value of 
+		lw $t2, 0($a0) #  Load the MIPS instruction
 		beq $t2, $t1, DciLoop2 #  Check if the ending character
-			
-		srl $t3, $t2, 26
-		#  Op code stored in $t3, $t2+ free
-			
 		addi $a0, $a0, 0x4
-			
+		
+		srl $t3, $t2, 26 #  Isolate the op code
+		
 		#  As branch instructions take 2 ARM operations, check if ARM, and add 1
 		li $t2, 0x1
 		beq $t2, $t3, ciBranch2
+		
 		sll $t2, $t2, 0x2
 		beq $t2, $t3, ciBranch2
 			
@@ -1200,28 +1182,27 @@ countInstructions:
 		add $t2, $t5, $t4
 		#  Store a 0 as its not a branch...
 		sb $0, 0($t2)
-			
+		
 		#  Move one address ahead in bTree
 		addi $t4, $t4, 0x1
-			
+		
 		j ciLoop2
-			
+		
 		ciBranch2:
 			#  Compute address of branchTree
 			add $t2, $t5, $t4
 			#  Load the value of 1
 			li $t3, 1
-				
+			
 			#  Store a 1 in the cmp spot
 			sb $t3, 0($t2)
 			#  Move one address ahead in bTree
 			addi $t4, $t4, 0x1
-				
+			
 			#  Compute address of branchTree
 			add $t2, $t5, $t4
-			#  Add 1 + 1 = 2
 			addi $t3, $t3, 1
-				
+			
 			#  Store a 2 in the BRANCH spot
 			sb $t3, 0($t2)
 				
@@ -1232,6 +1213,7 @@ countInstructions:
 		j ciLoop2
 	DciLoop2:
 	
+	#  Prepare the return value
 	move $v0, $t0
 	
 	lw $ra, -4($fp)
