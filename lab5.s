@@ -483,7 +483,6 @@ allocateARMword:
 #
 #	Based on an input of the address for the immediate field that we are converting into a rotated field, 
 #
-#
 #	$a0 => address to immediate value to have the rotation computed
 #
 #	$v0 <= value of the rotation
@@ -507,13 +506,12 @@ computeRotate:
 	sw $t5, -32($fp)
 	sw $t6, -36($fp)
 	
-	#  Calculate the distance from the most signifigant bit and least signifigant bit
-	lw $t0, 0($a0)
+	#  Step 1: Calculate the distance from the most signifigant bit and least signifigant bit
+	lw $t0, 0($a0) #  Load the imm value
 	
-	beqz $t0, crZero
+	beqz $t0, crZero #  Check if its zero
 	
-	li $t1, 0x1
-	
+	li $t1, 0x1 #  Find the fist bit
 	crCountLength:
 		#  Check if first bit is one, else add a 1 to the counter and shift the value to the right by one
 		andi $t2, $t0, 0x1
@@ -524,9 +522,9 @@ computeRotate:
 	crCountLengthEnd:
 	#  $t1 <= Position of the first (1)
 	
-	lw $t0, 0($a0)
+	lw $t0, 0($a0) #  Reload the imm value
 	
-	li $t2, 0x1
+	li $t2, 0x1 #  Find the last bit
 	crCountLength2:
 		srl $t0, $t0, 1
 		beqz $t0, crCountLengthEnd2
@@ -540,15 +538,13 @@ computeRotate:
 	addi $t3, $t3, 1
 	lw $t0, 0($a0)
 	
-	# sltiu $t4, $t1, 9
-	# bne $t4, $0, crLess
-	
 	crMore:
+		#  Check if its length is < 8
 		li $t4, 8
 		ble $t2, $t4, crmImm
 		
 		crmMore:
-			li $t4, 0
+			li $t4, 0 #  Count the number of shifts it takes to make this zero, hence equalling the number of rotates
 			crmL1:
 				beqz $t0, crmL1E
 				addi $t4, $t4, 1
@@ -556,20 +552,24 @@ computeRotate:
 				j crmL1
 			crmL1E:
 			
+			#  Calculate the number of value for the imm field, noting that only shifts supporting a multiple of 4 will be supported
 			li $t5, 2
 			mult $t5, $t4
 			mflo $t5
 			
+			#  number of left bits needed to shift out to equal zero =>> leading to the number related to the rotate from the imm
 			li $t6, 32
 			sub $t5, $t6, $t5
 			
 			lw $t0, 0($a0)
 			srlv $v1, $t0, $t5
 			
+			#  Prepare the values for the return
 			move $v0, $t4
 			
 			j crDone
 		crmImm:
+			# Within the first 8, no rotation needed
 			li $v0, 0x0
 			move $v1, $t0
 		
@@ -583,6 +583,7 @@ computeRotate:
 	
 	crDone:
 	
+	#  Restore the values from the stack
 	lw $ra, -4($fp)
 	lw $a0, -8($fp)
 	lw $t0, -12($fp)
@@ -637,6 +638,7 @@ convertMIPStoARMregister:
 	#  29 sp: 13
 	#  31 ra: 14
 	
+	#  Attempt to match the field to the above table
 	lw $t0, 0($a0)
 	
 	slti $t1, $t0, 13
@@ -659,9 +661,11 @@ convertMIPStoARMregister:
 		li $v0, 14
 		j DonecmtaDirect
 	cmtaDirect:
+		#  Is within the 1-1 range for the instruction, just copy it...
 		add $v0, $t0, $0
 	DonecmtaDirect:
 	
+	#  Reqind the stack values
 	lw $ra, -4($fp)
 	lw $t0, -8($fp)
 	lw $t1, -12($fp)
